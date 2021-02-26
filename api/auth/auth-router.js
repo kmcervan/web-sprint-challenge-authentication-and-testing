@@ -1,7 +1,76 @@
 const router = require('express').Router();
+const User = require('../jokes/jokes-model');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-router.post('/register', (req, res) => {
-  res.end('implement register, please!');
+// const { isValid } = require('../jokes/jokes-service');
+const { jwtSecret } = require('../../config/secrets');
+
+function isValid(user) {
+  return Boolean(user.username && user.password && typeof user.password === "string");
+}
+
+const checkPayLoad = (req, res, next) => {
+  if(!req.body.username || !req.body.password){
+    res.status(401).json("username and password required")
+  }else{
+    next()
+  }
+}
+
+const checkUserInDb = async (req, res, next) => {
+  try{
+    const rows = await User.findBy({ username: req.body.username})
+    if(!rows.length){
+      next()
+    }else{
+      res.status(401).json("username taken")
+    }
+  }catch(error){
+    res.status(500).json(`Server Error: ${error}`)
+  }
+}
+
+// const checkUserExists = async (req, res, next) => {
+//   try{
+//     const rows = await User.findBy({ username: req.body.username })
+//     if(rows.length){
+//       req.userData = rows[0]
+//       next()
+//     }else{
+//       res.status(401).json('Username or Password are invalid')
+//     }
+//   }catch(error){
+//     res.status(500).json(`Server Error: ${error}`)
+//   }
+// }
+
+router.post('/register',checkPayLoad, checkUserInDb, (req, res) => {
+  const credentials = req.body;
+
+  if(isValid(credentials)){
+    const rounds = process.env.BCRYPT_ROUNDS || 8;
+
+    //hashing password here
+    const hash = bcrypt.hashSync(credentials.password, rounds);
+
+    credentials.password = hash;
+
+    //saving user
+    User.add(credentials)
+    .then(user => {
+      res.status(201).json(user);
+    })
+    .catch(error => {
+      res.status(500).json({ message: error.message });
+    });
+  }
+  // else{
+  //   res.status(400).json(
+  //     "username and password required"
+  //   );
+  
+  // res.end('implement register, please!');
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -28,8 +97,30 @@ router.post('/register', (req, res) => {
   */
 });
 
-router.post('/login', (req, res) => {
-  res.end('implement login, please!');
+router.post('/login', checkPayLoad,  (req, res) => {
+  const { username, password } = req.body;
+
+  if(isValid(req.body)){
+    User.findBy({ username: username})
+    .then(([user]) => {
+      if(user && bcrypt.compareSync(password, user.password)){
+        const token = makeToken(user)
+
+        res.status(200).json({
+          message: `welcome, ${user.username}`, token
+        });
+      }else {
+        res.status(401).json("invalid credentials")
+      }
+    })
+    .catch(error => {
+      res.status(500).json({ message: error.message});
+    })
+  }
+
+ 
+  
+  // res.end('implement login, please!');
   /*
     IMPLEMEN
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -55,4 +146,14 @@ router.post('/login', (req, res) => {
   */
 });
 
+ function makeToken(user){
+    const payload = {
+        subject:user.id,
+        username:user.username
+    }
+    const options = {
+        expiresIn: '500s'
+    }
+    return jwt.sign(payload,jwtSecret,options)
+}
 module.exports = router;
